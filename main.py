@@ -3,11 +3,7 @@ import colorsys
 import math
 from enum import Enum
 import open3d as o3d
-from sklearn.cluster import DBSCAN, AgglomerativeClustering, OPTICS
-import csg_c
-
-import hdbscan
-
+from sklearn.cluster import DBSCAN
 
 class ManifoldType(Enum):
     NONE = 0
@@ -61,7 +57,7 @@ def read_pc(file):
     return pc
 
 
-def normalize_pc(pc):
+def normalize_pc(pc, label_weight):
     x_max, y_max, z_max, _, _, _, _, _, _, _, _ = pc.max(axis=0)
     x_min, y_min, z_min, _, _, _, _, _, _, _, _ = pc.min(axis=0)
 
@@ -72,7 +68,12 @@ def normalize_pc(pc):
     f = np.max([abs(x_max - x_min), abs(y_max - y_min), abs(z_max - z_min)])
 
     pc[:, 0:3] /= f
-    pc[:, 3:6] /= np.linalg.norm(pc[:, 3:6], ord=2, axis=1, keepdims=True)
+
+    pc[:, 3:6] /= (np.linalg.norm(pc[:, 3:6], ord=2, axis=1, keepdims=True))
+
+    #pc[:, 6:9] *= 1024
+
+    #print( pc[:10, 6:9])
 
     return pc
 
@@ -93,36 +94,76 @@ def read_manifolds(path):
     return pc, manifolds
 
 
-def write_clusters(path, labels, data):
-    file = open(path, "w")
+def write_clusters(path, data):
 
-    file.write(str(len(np.unique(labels))) + "\n")
+    total_clusters = []
+
+    clusters = extract_clusters(data, False)
+
+    for cluster in clusters:
+
+        manifold_type = cluster[0]
+        points = cluster[1]
+
+        if manifold_type is ManifoldType.SPHERE or manifold_type is ManifoldType.PLANE:
+            sub_clusters = extract_clusters(points, True)
+            for sub_cluster in sub_clusters:
+                total_clusters.append(sub_cluster)
+        else:
+            total_clusters.append(cluster)
+
+    file = open(path, "w")
+    file.write(str(len(total_clusters)) + "\n")
+    for cluster in total_clusters:
+        write_cluster(file,cluster)
+
+    return total_clusters
+
+
+def extract_clusters(data, sub_cluster_mode):
+
+    dbscan = DBSCAN(eps=0.1)
+
+    db = None
+    if sub_cluster_mode is True:
+        db = dbscan.fit(data[:, [0, 1, 2, 3, 4, 5]])
+    else:
+        db = dbscan.fit(data[:, [0, 1, 2, 6, 7, 8]])
+
+    labels = db.labels_
 
     clusters = {}
     i = 0
     for l in labels:
-
-        clusters.setdefault(str(l), []).append(data[i,:9])
+        clusters.setdefault(str(l), []).append(data[i, :9])
         i += 1
 
-
+    res_clusters = []
     for key, points in clusters.items():
 
         manifold_type = ManifoldType.NONE
-        if points[0][6] > 0.5:
+        if points[0][6] > 0.0001:
             manifold_type = ManifoldType.CYLINDER
-        elif points[0][7] > 0.5:
+        elif points[0][7] > 0.0001:
             manifold_type = ManifoldType.SPHERE
-        elif points[0][8] > 0.5:
+        elif points[0][8] > 0.0001:
             manifold_type = ManifoldType.PLANE
 
-        file.write(str(manifold_type.value) + "\n")
-        file.write(str(len(points)) + " 6\n")
-        for p in points:
-            file.write(str(p[0]) + " " + str(p[1]) + " " + str(p[2]) + " " + str(p[3]) + " " + str(p[4]) + " " + str(p[5]) + "\n")
+        print("TYPE: " + str(manifold_type))
+
+        res_clusters.append((manifold_type, np.array(points)))
+
+    return res_clusters
+
+def write_cluster(file, cluster):
+    file.write(str(cluster[0].value) + "\n")
+    file.write(str(len(cluster[1])) + " 6\n")
+    for p in cluster[1]:
+        file.write(
+            str(p[0]) + " " + str(p[1]) + " " + str(p[2]) + " " + str(p[3]) + " " + str(p[4]) + " " + str(p[5]) + "\n")
 
 if __name__ == "__main__":
-
+    label_weight = 32.0
     _, manifolds = read_manifolds("C:/Projekte/csg_playground_build/ransac_res.txt")
 
     data = []
@@ -152,96 +193,46 @@ if __name__ == "__main__":
             theta = math.acos(p[5]) / math.pi
             phi = (math.atan2(p[4], p[3]) + math.pi) / (2.0 * math.pi)
 
-            if phi > 1.0 or phi < 0.0:
-                print(phi)
-
             p.append(theta)
             p.append(phi)
 
-            # t = #float(m[0].value)
-            # p.append(t)
-            # print(p)
             data.append(p)
 
     print("Number of manifolds: " + str(len(manifolds)))
 
     data = np.array(data)
 
-    normalize_pc(data)
-    print("PC normalized.")
+    normalize_pc(data, label_weight)
 
+    clusters = write_clusters("test.txt", data)
 
-    # csg_c.ransac(np.array([[1.0,2.0,3.0,4.0,5.0,6.0],[7.0,8.0,9.0,10.0,11.0,12.0]], dtype=np.float32))#data[:,:6])
-    # csg_c.ransac(np.array(data[:,:6])) #we need to do the copy here, standard type is double
-    # print(data[:2,:6])
-
-    # print(data[:,[0,1,2,6]])
-
-    def similarity(x, y):
-
-        # return np.linalg.norm(x - y)
-
-        dist = np.linalg.norm(x[:3] - y[:3])
-
-        label_dist = float(x[6] != y[6])
-
-        angle_dist = 0.0
-
-        # print(str(dist) + " " + str(label_dist))
-
-        return dist + angle_dist + label_dist
-
-
-    dbscan = DBSCAN(eps=0.1)  # , metric=similarity)
-
-    optics = OPTICS(min_samples=200,
-                    xi=0.5,
-                    min_cluster_size=2.0)
-
-    cluster_algo = dbscan
-    db = cluster_algo.fit(data[:, [0, 1, 2, 3, 4, 5, 6, 7, 8]])
-    labels = db.labels_
-
-    write_clusters("test.txt", labels, data)
-
-    # clusterer = clusterer = hdbscan.HDBSCAN(min_cluster_size=10)
-    # labels = clusterer.fit_predict(data[:,[0,1,2,3,4,5,6,7,8]])
+    print("Number of clusters: " + str(len(clusters)))
 
     colors = np.array(3, dtype=float)
-
-    N = len(set(labels))
+    N = len(clusters)
     c = [colorsys.hsv_to_rgb(x * 1.0 / N, 0.5, 0.5) for x in range(N)]
-    colors = np.zeros(shape=(len(labels), 3))
-    i = 0
-    for label in labels:
-        colors[i, :] = c[label]
-        i += 1
 
-    # colors /= float(len(set(labels)))
-    # print(colors)
+    num_points = 0
+    for cluster in clusters:
+        num_points += len(cluster[1])
+    colors = np.zeros(shape=(num_points, 3))
+    points = np.zeros(shape=(num_points, 9))
+    point_idx = 0
+    cluster_idx = 0
+    for cluster in clusters:
+        for point in cluster[1]:
+            colors[point_idx, :] = c[cluster_idx]
+            points[point_idx] = point
+            point_idx += 1
+        cluster_idx += 1
 
-    # core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
-    # core_samples_mask[db.core_sample_indices_] = True
-
-    # unique_labels = set(labels)
-
-    # for unique_label in unique_labels:
-
-    # class_member_mask = (labels == unique_label)
-
-    # Number of clusters in labels, ignoring noise if present.
-    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-    n_noise = list(labels).count(-1)
-
-    print("Clusters: " + str(n_clusters) + " Noise: " + str(n_noise))
-
-    data2 = farthest_points(data[:, :3], 1000)
-    print("Data: " + str(len(data2)))
+    #data2 = farthest_points(data[:, :3], 1000)
+    #print("Data: " + str(len(data2)))
 
     # print(data[:, :3])
 
     pcd = o3d.PointCloud()
-    pcd.points = o3d.Vector3dVector(data[:, :3])
+    pcd.points = o3d.Vector3dVector(points[:, :3])
     pcd.colors = o3d.Vector3dVector(colors)
 
     # pcd = read_point_cloud("model_1.xyzn")
