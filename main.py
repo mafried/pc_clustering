@@ -5,6 +5,7 @@ from enum import Enum
 import open3d as o3d
 from sklearn.cluster import DBSCAN
 
+
 class ManifoldType(Enum):
     NONE = 0
     CYLINDER = 1
@@ -94,7 +95,7 @@ def read_manifolds(path):
     return pc, manifolds
 
 
-def write_clusters(path, data):
+def write_clusters(path, data, subcluster_types):
 
     total_clusters = []
 
@@ -105,7 +106,7 @@ def write_clusters(path, data):
         manifold_type = cluster[0]
         points = cluster[1]
 
-        if manifold_type is ManifoldType.SPHERE or manifold_type is ManifoldType.PLANE:
+        if manifold_type in subcluster_types:
             sub_clusters = extract_clusters(points, True)
             for sub_cluster in sub_clusters:
                 total_clusters.append(sub_cluster)
@@ -126,9 +127,9 @@ def extract_clusters(data, sub_cluster_mode):
 
     db = None
     if sub_cluster_mode is True:
-        db = dbscan.fit(data[:, [0, 1, 2, 3, 4, 5]])
+        db = dbscan.fit(data[:, [ 0, 1, 2,3, 4, 5]])
     else:
-        db = dbscan.fit(data[:, [0, 1, 2, 6, 7, 8]])
+        db = dbscan.fit(data[:, [ 0, 1, 2,6, 7, 8]])
 
     labels = db.labels_
 
@@ -149,7 +150,6 @@ def extract_clusters(data, sub_cluster_mode):
         elif points[0][8] > 0.0001:
             manifold_type = ManifoldType.PLANE
 
-        print("TYPE: " + str(manifold_type))
 
         res_clusters.append((manifold_type, np.array(points)))
 
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     data = []
 
     for m in manifolds:
-        print("Type: " + str(m[0]))
+        #print("Type: " + str(m[0]))
 
         for p in m[1]:
 
@@ -204,9 +204,11 @@ if __name__ == "__main__":
 
     normalize_pc(data, label_weight)
 
-    clusters = write_clusters("test.txt", data)
+    clusters = write_clusters("test.txt", data, [ManifoldType.SPHERE, ManifoldType.PLANE])
 
     print("Number of clusters: " + str(len(clusters)))
+    for cluster in clusters:
+        print("Cluster " + str(cluster[0]))
 
     colors = np.array(3, dtype=float)
     N = len(clusters)
