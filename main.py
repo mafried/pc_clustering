@@ -129,7 +129,7 @@ def extract_clusters(data, sub_cluster_mode):
     if sub_cluster_mode is True:
         db = dbscan.fit(data[:, [ 0, 1, 2,3, 4, 5]])
     else:
-        db = dbscan.fit(data[:, [ 0, 1, 2,6, 7, 8]])
+        db = dbscan.fit(data[:, [ 0, 1, 2, 3,4,5]])
 
     labels = db.labels_
 
