@@ -10,7 +10,7 @@ class ManifoldType(Enum):
     NONE = 0
     CYLINDER = 1
     SPHERE = 2
-    PLANE = 3
+    PLANE = 4
 
 
 def calc_distances(p0, points):
@@ -204,7 +204,7 @@ if __name__ == "__main__":
 
     normalize_pc(data, label_weight)
 
-    clusters = write_clusters("test.txt", data, [ManifoldType.SPHERE, ManifoldType.PLANE])
+    clusters = write_clusters("test.txt", data, [ManifoldType.SPHERE, ManifoldType.PLANE, ManifoldType.CYLINDER])
 
     print("Number of clusters: " + str(len(clusters)))
     for cluster in clusters:
